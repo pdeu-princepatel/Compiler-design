@@ -1,224 +1,173 @@
 import java.util.*;
 
 public class LL1 {
-    static Map<String, List<String>> grammar = new HashMap<>();
+
+    static Map<String, List<String>> grammar = new LinkedHashMap<>();
+    static Map<String, List<String>> transformedGrammar = new LinkedHashMap<>();
     static Map<String, Set<String>> first = new HashMap<>();
     static Map<String, Set<String>> follow = new HashMap<>();
-    static Map<String, Map<String, String>> parseTable = new HashMap<>();
-    static String startSymbol = "E";
-    static Set<String> terminals = new HashSet<>(Arrays.asList("id", "+", "*", "$", "ε"));
+    static Map<String, Map<String, String>> parsingTable = new HashMap<>();
+
+    static Set<String> terminals = new HashSet<>();
     static Set<String> nonTerminals = new HashSet<>();
+    static String startSymbol = "E";
 
-    public static void main(String[] args) {
-        String grammarStr = "E -> E+E | E*E | id";
-        System.out.println("Given grammar:");
-        System.out.println(grammarStr);
+    static {
+        // Input grammar (with potential left recursion)
+        grammar.put("E", Arrays.asList("E + T", "T"));
+        grammar.put("T", Arrays.asList("T * F", "F"));
+        grammar.put("F", Arrays.asList("( E )", "id"));
 
-        grammarStr = removeLeftRecursion(grammarStr);
-        System.out.println("\nAfter removal of Left Recursion:");
-        System.out.println(grammarStr);
+        nonTerminals.addAll(grammar.keySet());
+    }
 
-        parseGrammarString(grammarStr);
-        
-        // This must be called AFTER parsing the grammar string
-        initializeNonTerminalsAndTerminals();
-        initializeFirstFollow();
-        
-        computeFirst();
-        computeFollow();
-        buildParseTable();
+    // Remove immediate left recursion
+    static void removeLeftRecursion() {
+        for (String A : grammar.keySet()) {
+            List<String> alpha = new ArrayList<>();
+            List<String> beta = new ArrayList<>();
 
-        System.out.println("\nFIRST sets:");
-        for (String nt : nonTerminals) {
-            System.out.println("FIRST(" + nt + ") = " + first.get(nt));
-        }
-
-        System.out.println("\nFOLLOW sets:");
-        for (String nt : nonTerminals) {
-            System.out.println("FOLLOW(" + nt + ") = " + follow.get(nt));
-        }
-        
-        System.out.println("\nParsing Table:");
-        List<String> sortedTerminals = new ArrayList<>(terminals);
-        sortedTerminals.sort(null);
-        List<String> sortedNonTerminals = new ArrayList<>(nonTerminals);
-        sortedNonTerminals.sort(null);
-
-        System.out.printf("%-10s", "");
-        for (String t : sortedTerminals) {
-            if (!t.equals("ε")) {
-                System.out.printf("%-10s", t);
-            }
-        }
-        System.out.println();
-        
-        for (String nt : sortedNonTerminals) {
-            System.out.printf("%-10s", nt);
-            for (String t : sortedTerminals) {
-                if (!t.equals("ε")) {
-                    String rule = parseTable.get(nt).get(t);
-                    if (rule != null) {
-                        System.out.printf("%-10s", nt + "->" + rule);
-                    } else {
-                        System.out.printf("%-10s", "");
-                    }
+            for (String production : grammar.get(A)) {
+                if (production.startsWith(A + " ")) {
+                    alpha.add(production.substring((A + " ").length()));  // remove A from the beginning
+                } else {
+                    beta.add(production);
                 }
             }
-            System.out.println();
-        }
 
-        Scanner sc = new Scanner(System.in);
-        System.out.println("\nEnter input string (tokens separated by space, end with $):");
-        String input = sc.nextLine().trim();
-        String[] tokens = input.split("\\s+");
-        sc.close();
+            if (!alpha.isEmpty()) {
+                String A1 = A + "'";
+                nonTerminals.add(A1);
+                List<String> newA = new ArrayList<>();
+                List<String> newA1 = new ArrayList<>();
 
-        System.out.println("\nParsing steps:");
-        parseInput(tokens);
-    }
-
-    static void initializeNonTerminalsAndTerminals() {
-        nonTerminals.clear();
-        for(String nt : grammar.keySet()) {
-            nonTerminals.add(nt);
-        }
-        
-        // Add all terminals from productions
-        for (List<String> prods : grammar.values()) {
-            for (String prod : prods) {
-                String[] symbols = prod.split(" ");
-                for (String sym : symbols) {
-                    if (!grammar.containsKey(sym) && !sym.equals("ε") && !sym.isEmpty()) {
-                        terminals.add(sym);
-                    }
+                for (String b : beta) {
+                    newA.add(b + " " + A1);
                 }
-            }
-        }
-    }
 
-    static void parseGrammarString(String grammarStr) {
-        grammar.clear();
-        String[] lines = grammarStr.split("\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) continue;
-            String[] parts = line.split("->");
-            String lhs = parts[0].trim();
-            String[] rhsProds = parts[1].split("\\|");
-            List<String> prods = new ArrayList<>();
-            for (String p : rhsProds) {
-                prods.add(p.trim());
-            }
-            grammar.put(lhs, prods);
-        }
-    }
+                for (String a : alpha) {
+                    newA1.add(a + " " + A1);
+                }
+                newA1.add("ε");
 
-    static String removeLeftRecursion(String grammar) {
-        StringBuilder g1 = new StringBuilder();
-        String[] parts = grammar.split("->");
-        String nonTerminal = parts[0].trim();
-        String[] productions = parts[1].split("\\|");
-
-        List<String> alpha = new ArrayList<>();
-        List<String> beta = new ArrayList<>();
-
-        for (String prod : productions) {
-            prod = prod.trim();
-            if (prod.startsWith(nonTerminal)) {
-                alpha.add(prod.substring(nonTerminal.length()).trim());
+                transformedGrammar.put(A, newA);
+                transformedGrammar.put(A1, newA1);
             } else {
-                beta.add(prod);
+                transformedGrammar.put(A, grammar.get(A));
             }
         }
 
-        if (alpha.isEmpty()) {
-            g1.append(grammar);
-        } else {
-            String newNonTerminal = nonTerminal + "'";
-            g1.append(nonTerminal).append(" -> ");
-            for (int i = 0; i < beta.size(); i++) {
-                g1.append(beta.get(i)).append(" ").append(newNonTerminal);
-                if (i != beta.size() - 1) g1.append(" | ");
+        // Recompute terminals
+        for (List<String> productions : transformedGrammar.values()) {
+            for (String prod : productions) {
+                for (String symbol : prod.split("\\s+")) {
+                    if (!symbol.equals("ε") && !transformedGrammar.containsKey(symbol)) {
+                        terminals.add(symbol);
+                    }
+                }
             }
-            g1.append("\n");
-
-            g1.append(newNonTerminal).append(" -> ");
-            for (int i = 0; i < alpha.size(); i++) {
-                g1.append(alpha.get(i)).append(" ").append(newNonTerminal);
-                if (i != alpha.size() - 1) g1.append(" | ");
-            }
-            g1.append(" | ε");
         }
-        return g1.toString();
+        terminals.add("$");
     }
 
+    // Compute FIRST sets
     static void computeFirst() {
+        for (String symbol : nonTerminals) {
+            first.put(symbol, new HashSet<>());
+        }
+
         boolean changed;
         do {
             changed = false;
-            for (String lhs : grammar.keySet()) {
-                for (String rhs : grammar.get(lhs)) {
-                    String[] symbols = rhs.split(" ");
-                    int before = first.get(lhs).size();
-                    
-                    boolean allNullable = true;
+            for (String nt : nonTerminals) {
+                for (String prod : transformedGrammar.get(nt)) {
+                    String[] symbols = prod.split("\\s+");
+                    boolean nullable = true;
+
                     for (String sym : symbols) {
-                        if (sym.isEmpty()) continue;
-                        Set<String> firstSet = getFirst(sym);
-                        first.get(lhs).addAll(firstSet);
-                        
+                        Set<String> firstSet;
+                        if (terminals.contains(sym)) {
+                            firstSet = new HashSet<>(Collections.singleton(sym));
+                        } else if (sym.equals("ε")) {
+                            firstSet = new HashSet<>(Collections.singleton("ε"));
+                        } else {
+                            firstSet = first.get(sym);
+                        }
+
+                        Set<String> targetSet = first.get(nt);
+                        int before = targetSet.size();
+                        for (String f : firstSet) {
+                            if (!f.equals("ε")) {
+                                targetSet.add(f);
+                            }
+                        }
+
                         if (!firstSet.contains("ε")) {
-                            allNullable = false;
+                            nullable = false;
                             break;
                         }
+
+                        if (targetSet.size() > before) {
+                            changed = true;
+                        }
                     }
-                    if (allNullable && !rhs.equals("ε")) {
-                        first.get(lhs).add("ε");
+
+                    if (nullable) {
+                        if (first.get(nt).add("ε")) {
+                            changed = true;
+                        }
                     }
-                    if (rhs.equals("ε")) {
-                         first.get(lhs).add("ε");
-                    }
-                    if (first.get(lhs).size() > before) changed = true;
                 }
             }
         } while (changed);
     }
 
+    // Compute FOLLOW sets
     static void computeFollow() {
+        for (String nt : nonTerminals) {
+            follow.put(nt, new HashSet<>());
+        }
         follow.get(startSymbol).add("$");
 
         boolean changed;
         do {
             changed = false;
-            for (String lhs : grammar.keySet()) {
-                for (String rhs : grammar.get(lhs)) {
-                    String[] symbols = rhs.split(" ");
+            for (String lhs : transformedGrammar.keySet()) {
+                for (String prod : transformedGrammar.get(lhs)) {
+                    String[] symbols = prod.split("\\s+");
                     for (int i = 0; i < symbols.length; i++) {
                         String B = symbols[i];
-                        if (nonTerminals.contains(B)) {
-                            Set<String> followB = follow.get(B);
-                            int before = followB.size();
+                        if (!nonTerminals.contains(B)) continue;
 
-                            boolean allNullable = true;
-                            for (int j = i + 1; j < symbols.length; j++) {
-                                String beta = symbols[j];
-                                if (beta.isEmpty()) continue;
-                                Set<String> firstBeta = getFirst(beta);
-                                followB.addAll(firstBeta);
-                                followB.remove("ε");
+                        Set<String> trailer = new HashSet<>();
+                        boolean nullable = true;
+                        for (int j = i + 1; j < symbols.length; j++) {
+                            String beta = symbols[j];
+                            Set<String> firstBeta = new HashSet<>();
+                            if (terminals.contains(beta)) {
+                                firstBeta.add(beta);
+                                nullable = false;
+                            } else {
+                                firstBeta.addAll(first.get(beta));
                                 if (!firstBeta.contains("ε")) {
-                                    allNullable = false;
-                                    break;
+                                    nullable = false;
                                 }
+                                firstBeta.remove("ε");
                             }
 
-                            if (i == symbols.length - 1 || allNullable) {
-                                followB.addAll(follow.get(lhs));
-                            }
+                            trailer.addAll(firstBeta);
 
-                            if (followB.size() > before) {
-                                changed = true;
-                            }
+                            if (!nullable) break;
+                        }
+
+                        if (nullable || i == symbols.length - 1) {
+                            trailer.addAll(follow.get(lhs));
+                        }
+
+                        int before = follow.get(B).size();
+                        follow.get(B).addAll(trailer);
+                        if (follow.get(B).size() > before) {
+                            changed = true;
                         }
                     }
                 }
@@ -226,140 +175,165 @@ public class LL1 {
         } while (changed);
     }
 
-    static void buildParseTable() {
-    for (String nonTerm : nonTerminals) {
-        parseTable.put(nonTerm, new HashMap<>());
-    }
-    
-    for (String nonTerm : grammar.keySet()) {
-        for (String production : grammar.get(nonTerm)) {
-            Set<String> firstSetOfProd = getFirstOfProduction(production);
-
-            for (String terminal : firstSetOfProd) {
-                if (!terminal.equals("ε")) {
-                    parseTable.get(nonTerm).put(terminal, production);
+    // Build LL(1) Parsing Table
+    static void buildParsingTable() {
+        for (String nt : transformedGrammar.keySet()) {
+            parsingTable.put(nt, new HashMap<>());
+            for (String prod : transformedGrammar.get(nt)) {
+                Set<String> firstSet = firstOfProduction(prod);
+                for (String terminal : firstSet) {
+                    if (!terminal.equals("ε")) {
+                        parsingTable.get(nt).put(terminal, prod);
+                    }
                 }
-            }
-
-            if (firstSetOfProd.contains("ε")) {
-                for (String followSym : follow.get(nonTerm)) {
-                    parseTable.get(nonTerm).put(followSym, production);
-                }
-            }
-        }
-    }
-}
-
-static Set<String> getFirstOfProduction(String production) {
-    Set<String> result = new HashSet<>();
-    String[] symbols = production.split(" ");
-    
-    boolean allNullable = true;
-    for (String sym : symbols) {
-        if (sym.isEmpty()) continue;
-        Set<String> firstSet = first.get(sym);
-        if (firstSet == null) {
-            // This case should be handled by proper initialization, but
-            // this check adds robustness.
-            continue;
-        }
-        result.addAll(firstSet);
-        result.remove("ε");
-        if (!firstSet.contains("ε")) {
-            allNullable = false;
-            break;
-        }
-    }
-
-    if (allNullable) {
-        result.add("ε");
-    }
-    
-    if (production.equals("ε")) {
-        result.add("ε");
-    }
-    
-    return result;
-}
-
-    static void parseInput(String[] tokens) {
-        Stack<String> stack = new Stack<>();
-        stack.push("$");
-        stack.push(startSymbol);
-
-        int i = 0;
-        while (!stack.isEmpty()) {
-            String top = stack.peek();
-            String currentToken = i < tokens.length ? tokens[i] : "$";
-            if (currentToken.isEmpty()) { // Handle empty space from split
-                i++;
-                continue;
-            }
-
-            System.out.printf("\nStack: %-30s Input: %-20s ", stack.toString(), String.join(" ", Arrays.copyOfRange(tokens, i, tokens.length)));
-
-            if (isTerminal(top)) {
-                if (top.equals(currentToken)) {
-                    System.out.println("Action: match " + currentToken);
-                    stack.pop();
-                    i++;
-                } else {
-                    System.out.println("Error: Terminal mismatch. Expected " + top + ", got " + currentToken);
-                    return;
-                }
-            } else { // top is a non-terminal
-                String rule = parseTable.get(top).get(currentToken);
-                if (rule == null) {
-                    System.out.println("Error: No rule for M[" + top + ", " + currentToken + "]");
-                    return;
-                }
-
-                System.out.println("Action: " + top + " -> " + rule);
-                stack.pop();
-                if (!rule.equals("ε")) {
-                    String[] rhsSymbols = rule.split(" ");
-                    for (int j = rhsSymbols.length - 1; j >= 0; j--) {
-                        if (!rhsSymbols[j].isEmpty()) {
-                            stack.push(rhsSymbols[j]);
-                        }
+                if (firstSet.contains("ε")) {
+                    for (String f : follow.get(nt)) {
+                        parsingTable.get(nt).put(f, prod);
                     }
                 }
             }
         }
-
-        if (i == tokens.length) {
-            System.out.println("\nInput accepted!");
-        } else {
-            System.out.println("\nError: Input not fully consumed.");
-        }
     }
 
-    static boolean isTerminal(String symbol) {
-        return terminals.contains(symbol);
-    }
-    
-    static Set<String> getFirst(String symbol) {
+    static Set<String> firstOfProduction(String prod) {
         Set<String> result = new HashSet<>();
-        if (isTerminal(symbol)) {
-            result.add(symbol);
-        } else {
-            result.addAll(first.get(symbol));
+        String[] symbols = prod.split("\\s+");
+        boolean nullable = true;
+
+        for (String sym : symbols) {
+            Set<String> firstSet;
+            if (terminals.contains(sym)) {
+                firstSet = new HashSet<>(Collections.singleton(sym));
+            } else if (sym.equals("ε")) {
+                firstSet = new HashSet<>(Collections.singleton("ε"));
+            } else {
+                firstSet = first.get(sym);
+            }
+
+            result.addAll(firstSet);
+            if (!firstSet.contains("ε")) {
+                nullable = false;
+                break;
+            }
+            result.remove("ε");
         }
+
+        if (nullable) result.add("ε");
         return result;
     }
-    
-    static void initializeFirstFollow() {
-        first.clear();
-        follow.clear();
 
-        for (String t : terminals) {
-            first.put(t, new HashSet<>(Collections.singleton(t)));
-        }
-
-        for (String nt : nonTerminals) {
-            first.putIfAbsent(nt, new HashSet<>());
-            follow.putIfAbsent(nt, new HashSet<>());
+    public static void printSetMap(String title, Map<String, Set<String>> map) {
+        System.out.println("\n" + title + ":");
+        for (String key : map.keySet()) {
+            System.out.println(key + " = " + map.get(key));
         }
     }
 
+    public static void printParsingTable() {
+        List<String> sortedTerminals = new ArrayList<>(terminals);
+        Collections.sort(sortedTerminals);
+        List<String> sortedNonTerminals = new ArrayList<>(nonTerminals);
+        Collections.sort(sortedNonTerminals);
+
+        System.out.println("\nLL(1) Parsing Table:");
+        System.out.printf("%-10s", "");
+        for (String t : sortedTerminals) {
+            System.out.printf("%-15s", t);
+        }
+        System.out.println();
+
+        for (String nt : sortedNonTerminals) {
+            System.out.printf("%-10s", nt);
+            for (String t : sortedTerminals) {
+                String rule = parsingTable.getOrDefault(nt, Collections.emptyMap()).get(t);
+                if (rule != null) {
+                    System.out.printf("%-15s", nt + "->" + rule);
+                } else {
+                    System.out.printf("%-15s", "");
+                }
+            }
+            System.out.println();
+        }
+    }
+
+    public static boolean parse(String input) {
+        Stack<String> stack = new Stack<>();
+        stack.push("$");
+        stack.push(startSymbol);
+
+        input = input.trim() + " $";
+        String[] tokens = input.split("\\s+");
+        int index = 0;
+
+        System.out.printf("\n%-30s %-30s %s%n", "Stack", "Input", "Action");
+        System.out.println("-------------------------------------------------------------");
+
+        while (true) {
+            String top = stack.peek();
+            String currentToken = tokens[index];
+
+            System.out.printf("%-30s %-30s ", stack, Arrays.toString(Arrays.copyOfRange(tokens, index, tokens.length)));
+
+            if (terminals.contains(top) || top.equals("$")) {
+                if (top.equals(currentToken)) {
+                    if (top.equals("$")) {
+                        System.out.println("Match $ → Input accepted.");
+                        return true;
+                    }
+                    System.out.println("Match " + top);
+                    stack.pop();
+                    index++;
+                } else {
+                    System.out.println("Error: Unexpected token '" + currentToken + "', expected '" + top + "'");
+                    return false;
+                }
+            } else if (nonTerminals.contains(top)) {
+                String production = parsingTable.getOrDefault(top, Collections.emptyMap()).get(currentToken);
+                if (production == null) {
+                    System.out.println("Error: No rule for [" + top + ", " + currentToken + "]");
+                    return false;
+                }
+
+                System.out.println("Apply " + top + " → " + production);
+                stack.pop();
+                if (!production.equals("ε")) {
+                    String[] symbols = production.split("\\s+");
+                    for (int i = symbols.length - 1; i >= 0; i--) {
+                        stack.push(symbols[i]);
+                    }
+                }
+            } else {
+                System.out.println("Error: Invalid symbol on stack: " + top);
+                return false;
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        removeLeftRecursion();
+        computeFirst();
+        computeFollow();
+        buildParsingTable();
+
+        System.out.println("Grammar after removing left recursion:");
+        for (Map.Entry<String, List<String>> entry : transformedGrammar.entrySet()) {
+            System.out.println(entry.getKey() + " -> " + String.join(" | ", entry.getValue()));
+        }
+
+        printSetMap("FIRST Sets", first);
+        printSetMap("FOLLOW Sets", follow);
+        printParsingTable();
+
+        Scanner sc = new Scanner(System.in);
+        System.out.println("\nEnter input string (tokens separated by space, e.g., id + id * id):");
+        String input = sc.nextLine();
+
+        if (parse(input)) {
+            // Already printed
+        } else {
+            System.out.println("Input rejected.");
+        }
+
+        sc.close();
+    }
 }
