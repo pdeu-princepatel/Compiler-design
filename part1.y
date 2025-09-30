@@ -1,27 +1,19 @@
 %{
-/*
- * This is the C declarations section for the parser.
- * We include standard libraries and declare the error function.
- */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 void yyerror(char *);
 int yylex(void);
 %}
 
-/* Define the tokens that Yacc will use */
 %token NUMBER
-
-/* Define operator precedence and associativity */
 %left '+' '-'
 %left '*' '/'
-
+%right '^'
 %%
-/*
- * These are the grammar rules.
- * The format is: non-terminal: components { C action }
- */
+
 
 program:    /* The program can be empty or have multiple expressions */
             | program expression { printf("= %d\n", $2); }
@@ -38,6 +30,7 @@ expression: NUMBER          { $$ = $1; }
                                               $$ = $1 / $3;
                                           }
                                         }
+            | expression '^' expression { $$ = (int)pow($1,$3); }
             | '(' expression ')'      { $$ = $2; }
             ;
 
