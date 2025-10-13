@@ -1,0 +1,4 @@
+ bison -d pyhtml.y 
+ flex pyhtml.l
+ gcc -o pyhtml lex.yy.c pyhtml.tab.c 
+ ./pyhtml test.pyhtml  
